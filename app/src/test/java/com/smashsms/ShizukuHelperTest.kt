@@ -37,4 +37,32 @@ class ShizukuHelperTest {
             cmd,
         )
     }
+
+    @Test
+    fun buildRestoreCommandUsesExpectedContentInsertArguments() {
+        val cmd = ShizukuHelper.buildRestoreCommand(
+            sender = "+15551234567",
+            body = "Hello there!",
+            timestamp = 1_700_000_000_000L,
+        )
+        assertArrayEquals(
+            arrayOf(
+                "content",
+                "insert",
+                "--uri",
+                "content://sms/inbox",
+                "--bind",
+                "address:s:+15551234567",
+                "--bind",
+                "body:s:Hello there!",
+                "--bind",
+                "date:l:1700000000000",
+                "--bind",
+                "read:i:0",
+                "--bind",
+                "type:i:1",
+            ),
+            cmd,
+        )
+    }
 }

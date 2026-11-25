@@ -1,5 +1,8 @@
 package com.smashsms.filter
 
+import com.smashsms.data.CustomKeyword
+import java.util.regex.PatternSyntaxException
+
 object SpamDetector {
 
     data class SpamRule(
@@ -50,8 +53,41 @@ object SpamDetector {
         ),
     )
 
-    fun detect(text: String?): SpamMatch {
+    fun builtInRuleNames(): List<String> = rules.map { it.name }
+
+    fun isValidRegex(pattern: String): Boolean {
+        return try {
+            Regex(pattern, RegexOption.IGNORE_CASE)
+            true
+        } catch (_: PatternSyntaxException) {
+            false
+        }
+    }
+
+    fun detect(
+        text: String?,
+        customKeywords: List<CustomKeyword> = emptyList(),
+    ): SpamMatch {
         if (text.isNullOrBlank()) return SpamMatch(isSpam = false)
+
+        for (custom in customKeywords) {
+            if (!custom.enabled) continue
+            val term = custom.keyword.trim()
+            if (term.isEmpty()) continue
+            val matched = if (custom.isRegex) {
+                try {
+                    Regex(term, RegexOption.IGNORE_CASE).containsMatchIn(text)
+                } catch (_: PatternSyntaxException) {
+                    false
+                }
+            } else {
+                text.contains(term, ignoreCase = true)
+            }
+            if (matched) {
+                return SpamMatch(isSpam = true, matchedRule = "Keyword: $term")
+            }
+        }
+
         for (rule in rules) {
             if (rule.regex.containsMatchIn(text)) {
                 return SpamMatch(isSpam = true, matchedRule = rule.name)

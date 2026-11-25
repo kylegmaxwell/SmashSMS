@@ -33,38 +33,53 @@ class SpamNotificationListenerService : NotificationListenerService() {
 
         val extracted = NotificationGatekeeper.extractMessageContent(notification) ?: return
         val (senderDisplay, senderNumber, body, latestSignature) = extracted
-
         val isContact = isSavedContact(senderNumber, senderDisplay)
-        if (!isContact) {
-            val match = SpamDetector.detect(body)
-            if (match.isSpam) {
-                cancelNotification(sbn.key)
-                alertTracker.onRemoved(sbn.key)
-                val displaySender = senderNumber ?: senderDisplay ?: "Unknown"
-                Log.i(
-                    TAG,
-                    "Dismissed Google Messages notification from $displaySender (rule=${match.matchedRule})",
-                )
-                logDismissedNotification(
-                    sender = displaySender,
-                    body = body,
-                    timestamp = sbn.postTime.takeIf { it > 0 } ?: System.currentTimeMillis(),
-                    matchedRule = match.matchedRule ?: "Unknown",
-                )
-                return
-            }
-        }
 
-        // Clean message (saved contact, group chat, or non-spam): act as sound/vibration gatekeeper.
-        val shouldAlert = alertTracker.shouldAlert(
-            key = sbn.key,
-            flags = notification.flags,
-            postTime = sbn.postTime,
-            nowMs = System.currentTimeMillis(),
-            latestSignature = latestSignature,
-        )
-        if (shouldAlert) {
-            alertCleanMessage(sbn)
+        serviceScope.launch {
+            try {
+                if (!isContact) {
+                    val db = SmashSmsDatabase.getInstance(applicationContext)
+                    val allowedSenders = db.allowedSenderDao().getAll()
+                    val isAllowed = allowedSenders.any {
+                        it.matches(senderNumber) || it.matches(senderDisplay)
+                    }
+                    if (!isAllowed) {
+                        val customKeywords = db.customKeywordDao().getEnabled()
+                        val match = SpamDetector.detect(body, customKeywords)
+                        if (match.isSpam) {
+                            cancelNotification(sbn.key)
+                            alertTracker.onRemoved(sbn.key)
+                            val displaySender = senderNumber ?: senderDisplay ?: "Unknown"
+                            val matchedRule = match.matchedRule ?: "Unknown"
+                            Log.i(
+                                TAG,
+                                "Dismissed Google Messages notification from $displaySender (rule=$matchedRule)",
+                            )
+                            logDismissedNotification(
+                                sender = displaySender,
+                                body = body,
+                                timestamp = sbn.postTime.takeIf { it > 0 } ?: System.currentTimeMillis(),
+                                matchedRule = matchedRule,
+                            )
+                            return@launch
+                        }
+                    }
+                }
+
+                // Clean message (saved contact, allowed sender, group chat, or non-spam): gatekeeper alert.
+                val shouldAlert = alertTracker.shouldAlert(
+                    key = sbn.key,
+                    flags = notification.flags,
+                    postTime = sbn.postTime,
+                    nowMs = System.currentTimeMillis(),
+                    latestSignature = latestSignature,
+                )
+                if (shouldAlert) {
+                    alertCleanMessage(sbn)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error handling notification", e)
+            }
         }
     }
 
@@ -145,36 +160,33 @@ class SpamNotificationListenerService : NotificationListenerService() {
         }
     }
 
-    private fun logDismissedNotification(
+    private suspend fun logDismissedNotification(
         sender: String,
         body: String,
         timestamp: Long,
         matchedRule: String,
     ) {
-        val appContext = applicationContext
-        serviceScope.launch {
-            try {
-                val dao = SmashSmsDatabase.getInstance(appContext).quarantinedMessageDao()
-                val alreadyLogged = dao.existsRecent(
-                    sender = sender,
-                    body = body,
-                    sinceTimestamp = timestamp - DEDUP_WINDOW_MS,
-                )
-                if (!alreadyLogged) {
-                    dao.insert(
-                        QuarantinedMessage(
-                            sender = sender,
-                            body = body,
-                            timestamp = timestamp,
-                            matchedRule = matchedRule,
-                            source = "Notification",
-                            deletedFromTelephony = false,
-                        ),
-                    )
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed logging dismissed notification", e)
+        try {
+            val dao = SmashSmsDatabase.getInstance(applicationContext).quarantinedMessageDao()
+            val normalizedSender = com.smashsms.data.AllowedSender.normalize(sender)
+            val alreadyLogged = dao.getRecent(timestamp - DEDUP_WINDOW_MS).any {
+                com.smashsms.data.AllowedSender.normalize(it.sender) == normalizedSender &&
+                    it.body == body
             }
+            if (!alreadyLogged) {
+                dao.insert(
+                    QuarantinedMessage(
+                        sender = sender,
+                        body = body,
+                        timestamp = timestamp,
+                        matchedRule = matchedRule,
+                        source = "Notification",
+                        deletedFromTelephony = false,
+                    ),
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed logging dismissed notification", e)
         }
     }
 

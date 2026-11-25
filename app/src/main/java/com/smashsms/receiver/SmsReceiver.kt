@@ -20,11 +20,10 @@ import kotlin.time.Duration.Companion.milliseconds
 
 class SmsReceiver : BroadcastReceiver() {
 
-    private data class IncomingSms(
+    private data class CandidateSms(
         val sender: String,
         val body: String,
         val timestamp: Long,
-        val matchedRule: String,
     )
 
     override fun onReceive(context: Context, intent: Intent?) {
@@ -44,46 +43,71 @@ class SmsReceiver : BroadcastReceiver() {
             timestamps.putIfAbsent(sender, sms.timestampMillis)
         }
 
-        val spamMatches = groupedBodies.mapNotNull { (sender, bodyBuilder) ->
-            val body = bodyBuilder.toString()
+        val candidates = groupedBodies.mapNotNull { (sender, bodyBuilder) ->
             if (ContactChecker.isContact(context, sender)) {
                 return@mapNotNull null
             }
-            val match = SpamDetector.detect(body)
-            if (!match.isSpam) return@mapNotNull null
-            IncomingSms(
+            CandidateSms(
                 sender = sender,
-                body = body,
+                body = bodyBuilder.toString(),
                 timestamp = timestamps[sender] ?: System.currentTimeMillis(),
-                matchedRule = match.matchedRule ?: "Unknown",
             )
         }
 
-        if (spamMatches.isEmpty()) return
+        if (candidates.isEmpty()) return
 
         val appContext = context.applicationContext
         val pendingResult = goAsync()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         scope.launch {
             try {
+                val db = SmashSmsDatabase.getInstance(appContext)
+                val allowedSenders = db.allowedSenderDao().getAll()
+                val customKeywords = db.customKeywordDao().getEnabled()
+
+                val spamMatches = candidates.mapNotNull { candidate ->
+                    if (allowedSenders.any { it.matches(candidate.sender) }) {
+                        return@mapNotNull null
+                    }
+                    val match = SpamDetector.detect(candidate.body, customKeywords)
+                    if (!match.isSpam) return@mapNotNull null
+                    candidate to (match.matchedRule ?: "Unknown")
+                }
+
+                if (spamMatches.isEmpty()) return@launch
+
                 // Allow Android's Telephony stack time to persist the incoming SMS row first.
                 delay(TELEPHONY_WRITE_DELAY)
-                val dao = SmashSmsDatabase.getInstance(appContext).quarantinedMessageDao()
-                for (item in spamMatches) {
+                val dao = db.quarantinedMessageDao()
+                for ((item, matchedRule) in spamMatches) {
                     val deleted = ShizukuHelper.deleteSmsByAddress(item.sender)
-                    dao.insert(
-                        QuarantinedMessage(
+                    val normalizedSender = com.smashsms.data.AllowedSender.normalize(item.sender)
+                    val existing = dao.getRecent(item.timestamp - DEDUP_WINDOW_MS).firstOrNull {
+                        com.smashsms.data.AllowedSender.normalize(it.sender) == normalizedSender &&
+                            it.body == item.body
+                    }
+                    if (existing != null) {
+                        dao.updateDeliveryStatus(
+                            id = existing.id,
                             sender = item.sender,
-                            body = item.body,
-                            timestamp = item.timestamp,
-                            matchedRule = item.matchedRule,
                             source = "SMS",
-                            deletedFromTelephony = deleted,
-                        ),
-                    )
+                            deletedFromTelephony = deleted || existing.deletedFromTelephony,
+                        )
+                    } else {
+                        dao.insert(
+                            QuarantinedMessage(
+                                sender = item.sender,
+                                body = item.body,
+                                timestamp = item.timestamp,
+                                matchedRule = matchedRule,
+                                source = "SMS",
+                                deletedFromTelephony = deleted,
+                            ),
+                        )
+                    }
                     Log.i(
                         TAG,
-                        "Quarantined SMS from ${item.sender} (rule=${item.matchedRule}, deleted=$deleted)",
+                        "Quarantined SMS from ${item.sender} (rule=$matchedRule, deleted=$deleted)",
                     )
                 }
             } catch (e: Exception) {
@@ -97,6 +121,7 @@ class SmsReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "SmsReceiver"
+        private const val DEDUP_WINDOW_MS = 15_000L
         private val TELEPHONY_WRITE_DELAY = 1500.milliseconds
     }
 }

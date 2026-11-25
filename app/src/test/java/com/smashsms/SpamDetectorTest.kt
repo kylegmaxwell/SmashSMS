@@ -1,6 +1,9 @@
 package com.smashsms
 
+import com.smashsms.data.AllowedSender
+import com.smashsms.data.CustomKeyword
 import com.smashsms.filter.SpamDetector
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -54,6 +57,36 @@ class SpamDetectorTest {
     fun detectReturnsMatchedRuleName() {
         val match = SpamDetector.detect("Donate via ActBlue before the FEC deadline")
         assertTrue(match.isSpam)
-        org.junit.Assert.assertEquals("ActBlue", match.matchedRule)
+        assertEquals("ActBlue", match.matchedRule)
+    }
+
+    @Test
+    fun detectMatchesEnabledCustomKeywordsAndSkipsDisabledOnes() {
+        val keywords = listOf(
+            CustomKeyword(id = 1, keyword = "crypto giveaway", isRegex = false, enabled = true),
+            CustomKeyword(id = 2, keyword = "lunch", isRegex = false, enabled = false),
+            CustomKeyword(id = 3, keyword = """\bfree\s+solar\b""", isRegex = true, enabled = true),
+            CustomKeyword(id = 4, keyword = "[invalid(", isRegex = true, enabled = true),
+        )
+
+        val phraseMatch = SpamDetector.detect("Claim your CRYPTO GIVEAWAY now", keywords)
+        assertTrue(phraseMatch.isSpam)
+        assertEquals("Keyword: crypto giveaway", phraseMatch.matchedRule)
+
+        val regexMatch = SpamDetector.detect("Get FREE   SOLAR panels installed", keywords)
+        assertTrue(regexMatch.isSpam)
+        assertEquals("""Keyword: \bfree\s+solar\b""", regexMatch.matchedRule)
+
+        val disabledMatch = SpamDetector.detect("Hey, lunch at 12:30?", keywords)
+        assertFalse(disabledMatch.isSpam)
+    }
+
+    @Test
+    fun allowedSenderNormalizesPhoneNumbersAcrossFormats() {
+        val allowed = AllowedSender(sender = "+15550192834")
+        assertTrue(allowed.matches("(555) 019-2834"))
+        assertTrue(allowed.matches("555-019-2834"))
+        assertTrue(allowed.matches("+1 555 019 2834"))
+        assertFalse(allowed.matches("+15550199999"))
     }
 }

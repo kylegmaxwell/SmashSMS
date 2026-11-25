@@ -4,6 +4,10 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.smashsms.data.AllowedSender
+import com.smashsms.data.AllowedSenderDao
+import com.smashsms.data.CustomKeyword
+import com.smashsms.data.CustomKeywordDao
 import com.smashsms.data.QuarantinedMessage
 import com.smashsms.data.QuarantinedMessageDao
 import com.smashsms.data.SmashSmsDatabase
@@ -22,6 +26,8 @@ class SmashSmsDatabaseTest {
 
     private lateinit var db: SmashSmsDatabase
     private lateinit var dao: QuarantinedMessageDao
+    private lateinit var keywordDao: CustomKeywordDao
+    private lateinit var allowedDao: AllowedSenderDao
 
     @Before
     fun setUp() {
@@ -30,6 +36,8 @@ class SmashSmsDatabaseTest {
             .allowMainThreadQueries()
             .build()
         dao = db.quarantinedMessageDao()
+        keywordDao = db.customKeywordDao()
+        allowedDao = db.allowedSenderDao()
     }
 
     @After
@@ -72,5 +80,25 @@ class SmashSmsDatabaseTest {
 
         dao.clearAll()
         assertTrue(dao.observeAll().first().isEmpty())
+    }
+
+    @Test
+    fun customKeywordsAndAllowedSendersCrud() = runBlocking {
+        val kwId = keywordDao.insert(CustomKeyword(keyword = "crypto giveaway"))
+        assertEquals(1, keywordDao.getEnabled().size)
+
+        keywordDao.setEnabled(kwId, false)
+        assertTrue(keywordDao.getEnabled().isEmpty())
+
+        keywordDao.deleteById(kwId)
+        assertTrue(keywordDao.observeAll().first().isEmpty())
+
+        val allowId = allowedDao.insert(AllowedSender(sender = "+15550192834"))
+        val saved = allowedDao.getAll()
+        assertEquals(1, saved.size)
+        assertTrue(saved[0].matches("(555) 019-2834"))
+
+        allowedDao.deleteById(allowId)
+        assertTrue(allowedDao.getAll().isEmpty())
     }
 }

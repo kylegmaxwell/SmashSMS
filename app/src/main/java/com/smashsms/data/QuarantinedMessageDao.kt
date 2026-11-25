@@ -13,11 +13,26 @@ interface QuarantinedMessageDao {
     @Query("SELECT * FROM quarantined_messages ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<QuarantinedMessage>>
 
+    @Query("SELECT * FROM quarantined_messages WHERE timestamp >= :sinceTimestamp")
+    suspend fun getRecent(sinceTimestamp: Long): List<QuarantinedMessage>
+
     @Query(
         "SELECT EXISTS(SELECT 1 FROM quarantined_messages " +
             "WHERE sender = :sender AND body = :body AND timestamp >= :sinceTimestamp)"
     )
     suspend fun existsRecent(sender: String, body: String, sinceTimestamp: Long): Boolean
+
+    @Query(
+        "UPDATE quarantined_messages " +
+            "SET sender = :sender, source = :source, deletedFromTelephony = :deletedFromTelephony " +
+            "WHERE id = :id"
+    )
+    suspend fun updateDeliveryStatus(
+        id: Long,
+        sender: String,
+        source: String,
+        deletedFromTelephony: Boolean,
+    )
 
     @Query("DELETE FROM quarantined_messages WHERE id = :id")
     suspend fun deleteById(id: Long)
