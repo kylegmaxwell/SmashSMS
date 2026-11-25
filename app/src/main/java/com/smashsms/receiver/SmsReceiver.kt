@@ -1,15 +1,15 @@
-package com.example.smashsms.receiver
+package com.smashsms.receiver
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.provider.Telephony
 import android.util.Log
-import com.example.smashsms.data.QuarantinedMessage
-import com.example.smashsms.data.SmashSmsDatabase
-import com.example.smashsms.filter.ContactChecker
-import com.example.smashsms.filter.SpamDetector
-import com.example.smashsms.shizuku.ShizukuHelper
+import com.smashsms.data.QuarantinedMessage
+import com.smashsms.data.SmashSmsDatabase
+import com.smashsms.filter.ContactChecker
+import com.smashsms.filter.SpamDetector
+import com.smashsms.shizuku.ShizukuHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

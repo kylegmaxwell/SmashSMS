@@ -1,4 +1,4 @@
-package com.example.smashsms.filter
+package com.smashsms.filter
 
 object SpamDetector {
 

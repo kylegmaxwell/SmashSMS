@@ -1,4 +1,4 @@
-package com.example.smashsms.shizuku
+package com.smashsms.shizuku
 
 import android.content.pm.PackageManager
 import android.util.Log
@@ -37,6 +37,18 @@ object ShizukuHelper {
         }
     }
 
+    internal fun buildDeleteCommand(sender: String): Array<String> {
+        val escapedSender = sender.replace("'", "''")
+        return arrayOf(
+            "content",
+            "delete",
+            "--uri",
+            "content://sms",
+            "--where",
+            "address='$escapedSender'",
+        )
+    }
+
     /**
      * Executes `content delete --uri content://sms --where "address='<ESCAPED_SENDER>'"`
      * via Shizuku.newProcess().
@@ -47,15 +59,7 @@ object ShizukuHelper {
             return false
         }
         val method = newProcessMethod ?: return false
-        val escapedSender = sender.replace("'", "''")
-        val cmd = arrayOf(
-            "content",
-            "delete",
-            "--uri",
-            "content://sms",
-            "--where",
-            "address='$escapedSender'",
-        )
+        val cmd = buildDeleteCommand(sender)
 
         var process: ShizukuRemoteProcess? = null
         return try {

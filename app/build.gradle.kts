@@ -5,13 +5,13 @@ plugins {
 }
 
 android {
-    namespace = "com.example.smashsms"
+    namespace = "com.smashsms"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.example.smashsms"
+        applicationId = "com.smashsms"
         minSdk = 34
         targetSdk = 37
         versionCode = 1

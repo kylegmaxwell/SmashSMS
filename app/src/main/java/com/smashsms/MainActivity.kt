@@ -1,4 +1,4 @@
-package com.example.smashsms
+package com.smashsms
 
 import android.Manifest
 import android.content.Context
@@ -53,10 +53,10 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import com.example.smashsms.data.QuarantinedMessage
-import com.example.smashsms.data.SmashSmsDatabase
-import com.example.smashsms.shizuku.ShizukuHelper
-import com.example.smashsms.ui.theme.SmashSMSTheme
+import com.smashsms.data.QuarantinedMessage
+import com.smashsms.data.SmashSmsDatabase
+import com.smashsms.shizuku.ShizukuHelper
+import com.smashsms.ui.theme.SmashSMSTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import rikka.shizuku.Shizuku
@@ -83,7 +83,7 @@ private val REQUIRED_RUNTIME_PERMISSIONS = arrayOf(
 
 private const val SHIZUKU_PERMISSION_REQUEST_CODE = 1001
 
-private data class SetupStatus(
+internal data class SetupStatus(
     val runtimePermissionsGranted: Boolean = false,
     val notificationAccessGranted: Boolean = false,
     val shizukuRunning: Boolean = false,
@@ -178,6 +178,13 @@ fun SmashSmsScreen() {
                 }
             }
         },
+        onOpenGoogleMessagesNotifications = {
+            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(Settings.EXTRA_APP_PACKAGE, "com.google.android.apps.messaging")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        },
         onClearAll = {
             coroutineScope.launch(Dispatchers.IO) {
                 dao.clearAll()
@@ -188,12 +195,13 @@ fun SmashSmsScreen() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SmashSmsContent(
+internal fun SmashSmsContent(
     status: SetupStatus,
     messages: List<QuarantinedMessage>,
     onRequestRuntimePermissions: () -> Unit,
     onOpenNotificationListenerSettings: () -> Unit,
     onRequestShizukuPermission: () -> Unit,
+    onOpenGoogleMessagesNotifications: () -> Unit,
     onClearAll: () -> Unit,
 ) {
     Scaffold(
@@ -264,6 +272,16 @@ private fun SmashSmsContent(
                     granted = status.shizukuGranted,
                     actionLabel = shizukuLabel,
                     onClick = onRequestShizukuPermission,
+                )
+            }
+
+            item {
+                PermissionRowCard(
+                    title = "Silence Google Messages",
+                    subtitle = "Optional: set Incoming Messages to Silent so SmashSMS handles sound/vibration only for clean messages",
+                    granted = false,
+                    actionLabel = "App Settings",
+                    onClick = onOpenGoogleMessagesNotifications,
                 )
             }
 
@@ -463,6 +481,7 @@ private fun SmashSmsPreview() {
             onRequestRuntimePermissions = {},
             onOpenNotificationListenerSettings = {},
             onRequestShizukuPermission = {},
+            onOpenGoogleMessagesNotifications = {},
             onClearAll = {},
         )
     }

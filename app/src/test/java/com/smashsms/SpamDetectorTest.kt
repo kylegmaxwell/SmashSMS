@@ -1,6 +1,6 @@
-package com.example.smashsms
+package com.smashsms
 
-import com.example.smashsms.filter.SpamDetector
+import com.smashsms.filter.SpamDetector
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -46,5 +46,14 @@ class SpamDetectorTest {
         for (sample in hamSamples) {
             assertFalse("Expected non-spam for: $sample", SpamDetector.isPoliticalSpam(sample))
         }
+        assertFalse(SpamDetector.isPoliticalSpam(null))
+        assertFalse(SpamDetector.isPoliticalSpam("   "))
+    }
+
+    @Test
+    fun detectReturnsMatchedRuleName() {
+        val match = SpamDetector.detect("Donate via ActBlue before the FEC deadline")
+        assertTrue(match.isSpam)
+        org.junit.Assert.assertEquals("ActBlue", match.matchedRule)
     }
 }

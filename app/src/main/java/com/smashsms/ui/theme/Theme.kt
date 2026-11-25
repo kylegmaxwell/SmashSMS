@@ -1,4 +1,4 @@
-package com.example.smashsms.ui.theme
+package com.smashsms.ui.theme
 
 import android.app.Activity
 import android.os.Build

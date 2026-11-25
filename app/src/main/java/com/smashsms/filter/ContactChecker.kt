@@ -1,4 +1,4 @@
-package com.example.smashsms.filter
+package com.smashsms.filter
 
 import android.Manifest
 import android.content.Context
@@ -76,6 +76,13 @@ object ContactChecker {
         } catch (e: Exception) {
             Log.w(TAG, "Error querying Contacts display name for $trimmed", e)
             false
+        }
+    }
+
+    internal fun looksLikePhoneNumber(value: String): Boolean {
+        val stripped = value.trim()
+        return stripped.any { it.isDigit() } && stripped.all {
+            it.isDigit() || it in setOf('+', '-', '(', ')', ' ', '.')
         }
     }
 }

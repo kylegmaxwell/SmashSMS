@@ -1,4 +1,4 @@
-package com.example.smashsms.data
+package com.smashsms.data
 
 import android.content.Context
 import androidx.room.Database

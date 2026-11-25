@@ -1,4 +1,4 @@
-package com.example.smashsms.data
+package com.smashsms.data
 
 import androidx.room.Dao
 import androidx.room.Insert
