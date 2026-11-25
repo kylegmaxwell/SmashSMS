@@ -62,6 +62,7 @@ class SmsReceiver : BroadcastReceiver() {
         scope.launch {
             try {
                 val db = SmashSmsDatabase.getInstance(appContext)
+                com.smashsms.data.RuleStatsTracker.syncVersionIfNeeded(appContext, db)
                 val allowedSenders = db.allowedSenderDao().getAll()
                 val customKeywords = db.customKeywordDao().getEnabled()
 
@@ -79,6 +80,7 @@ class SmsReceiver : BroadcastReceiver() {
                 // Allow Android's Telephony stack time to persist the incoming SMS row first.
                 delay(TELEPHONY_WRITE_DELAY)
                 val dao = db.quarantinedMessageDao()
+                val ruleStatDao = db.ruleStatDao()
                 for ((item, matchedRule) in spamMatches) {
                     val deleted = ShizukuHelper.deleteSmsByAddress(item.sender)
                     val normalizedSender = com.smashsms.data.AllowedSender.normalize(item.sender)
@@ -104,6 +106,7 @@ class SmsReceiver : BroadcastReceiver() {
                                 deletedFromTelephony = deleted,
                             ),
                         )
+                        ruleStatDao.incrementBlocked(matchedRule, item.timestamp)
                     }
                     Log.i(
                         TAG,

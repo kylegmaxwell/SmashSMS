@@ -167,7 +167,9 @@ class SpamNotificationListenerService : NotificationListenerService() {
         matchedRule: String,
     ) {
         try {
-            val dao = SmashSmsDatabase.getInstance(applicationContext).quarantinedMessageDao()
+            val db = SmashSmsDatabase.getInstance(applicationContext)
+            com.smashsms.data.RuleStatsTracker.syncVersionIfNeeded(applicationContext, db)
+            val dao = db.quarantinedMessageDao()
             val normalizedSender = com.smashsms.data.AllowedSender.normalize(sender)
             val alreadyLogged = dao.getRecent(timestamp - DEDUP_WINDOW_MS).any {
                 com.smashsms.data.AllowedSender.normalize(it.sender) == normalizedSender &&
@@ -184,6 +186,7 @@ class SpamNotificationListenerService : NotificationListenerService() {
                         deletedFromTelephony = false,
                     ),
                 )
+                db.ruleStatDao().incrementBlocked(matchedRule, timestamp)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed logging dismissed notification", e)

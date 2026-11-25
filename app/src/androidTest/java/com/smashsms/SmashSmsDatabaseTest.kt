@@ -10,6 +10,7 @@ import com.smashsms.data.CustomKeyword
 import com.smashsms.data.CustomKeywordDao
 import com.smashsms.data.QuarantinedMessage
 import com.smashsms.data.QuarantinedMessageDao
+import com.smashsms.data.RuleStatDao
 import com.smashsms.data.SmashSmsDatabase
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
@@ -28,6 +29,7 @@ class SmashSmsDatabaseTest {
     private lateinit var dao: QuarantinedMessageDao
     private lateinit var keywordDao: CustomKeywordDao
     private lateinit var allowedDao: AllowedSenderDao
+    private lateinit var ruleStatDao: RuleStatDao
 
     @Before
     fun setUp() {
@@ -38,6 +40,7 @@ class SmashSmsDatabaseTest {
         dao = db.quarantinedMessageDao()
         keywordDao = db.customKeywordDao()
         allowedDao = db.allowedSenderDao()
+        ruleStatDao = db.ruleStatDao()
     }
 
     @After
@@ -100,5 +103,24 @@ class SmashSmsDatabaseTest {
 
         allowedDao.deleteById(allowId)
         assertTrue(allowedDao.getAll().isEmpty())
+    }
+
+    @Test
+    fun ruleStatsIncrementsBlockedAndOverrides() = runBlocking {
+        ruleStatDao.incrementBlocked("ActBlue", now = 1_000L)
+        ruleStatDao.incrementBlocked("ActBlue", now = 2_000L)
+        ruleStatDao.incrementOverride("ActBlue", now = 3_000L)
+        ruleStatDao.incrementOverride("Reply STOP/END", now = 4_000L)
+
+        val actBlue = ruleStatDao.getByRuleName("ActBlue")
+        assertEquals(2, actBlue?.blockedCount)
+        assertEquals(1, actBlue?.overrideCount)
+
+        val stopToEnd = ruleStatDao.getByRuleName("Reply STOP/END")
+        assertEquals(0, stopToEnd?.blockedCount)
+        assertEquals(1, stopToEnd?.overrideCount)
+
+        ruleStatDao.clearAll()
+        assertTrue(ruleStatDao.getAll().isEmpty())
     }
 }

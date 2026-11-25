@@ -11,6 +11,7 @@ import androidx.compose.ui.test.performTextInput
 import com.smashsms.data.AllowedSender
 import com.smashsms.data.CustomKeyword
 import com.smashsms.data.QuarantinedMessage
+import com.smashsms.data.RuleStat
 import com.smashsms.ui.theme.SmashSMSTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -118,6 +119,8 @@ class MainActivityUiTest {
     @Test
     fun rulesTabAddsCustomKeywordAndSwitchesTabs() {
         var addedKeyword: String? = null
+        var exported = false
+        var resetStats = false
         var currentTab by mutableStateOf(SmashTab.REVIEW)
 
         composeRule.setContent {
@@ -138,6 +141,9 @@ class MainActivityUiTest {
                     allowedSenders = listOf(
                         AllowedSender(id = 1L, sender = "+15550192834"),
                     ),
+                    ruleStats = listOf(
+                        RuleStat(ruleName = "ActBlue", blockedCount = 3, overrideCount = 1),
+                    ),
                     onRequestRuntimePermissions = {},
                     onOpenNotificationListenerSettings = {},
                     onRequestShizukuPermission = {},
@@ -149,6 +155,8 @@ class MainActivityUiTest {
                     onToggleCustomKeyword = { _, _ -> },
                     onDeleteCustomKeyword = {},
                     onRemoveAllowedSender = {},
+                    onExportManifest = { exported = true },
+                    onResetRuleStats = { resetStats = true },
                 )
             }
         }
@@ -160,5 +168,12 @@ class MainActivityUiTest {
         composeRule.onNodeWithText("Block keyword or phrase").performTextInput("solar rebate")
         composeRule.onNodeWithText("Add Keyword").performClick()
         assertEquals("solar rebate", addedKeyword)
+
+        composeRule.onNodeWithText("3 blocks • 1 overrides • 1 custom patterns").assertIsDisplayed()
+        composeRule.onNodeWithText("Export Manifest").performClick()
+        assertTrue(exported)
+
+        composeRule.onNodeWithText("Reset Stats").performClick()
+        assertTrue(resetStats)
     }
 }

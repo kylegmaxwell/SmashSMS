@@ -56,6 +56,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,6 +84,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.smashsms.data.AllowedSender
 import com.smashsms.data.CustomKeyword
 import com.smashsms.data.QuarantinedMessage
+import com.smashsms.data.RuleManifest
+import com.smashsms.data.RuleStat
+import com.smashsms.data.RuleStatsTracker
 import com.smashsms.data.SmashSmsDatabase
 import com.smashsms.filter.SpamDetector
 import com.smashsms.shizuku.ShizukuHelper
@@ -199,10 +203,18 @@ fun SmashSmsScreen() {
     val messageDao = remember(db) { db.quarantinedMessageDao() }
     val keywordDao = remember(db) { db.customKeywordDao() }
     val allowedDao = remember(db) { db.allowedSenderDao() }
+    val ruleStatDao = remember(db) { db.ruleStatDao() }
+
+    LaunchedEffect(db) {
+        withContext(Dispatchers.IO) {
+            RuleStatsTracker.syncVersionIfNeeded(context, db)
+        }
+    }
 
     val quarantinedMessages by messageDao.observeAll().collectAsState(initial = emptyList())
     val customKeywords by keywordDao.observeAll().collectAsState(initial = emptyList())
     val allowedSenders by allowedDao.observeAll().collectAsState(initial = emptyList())
+    val ruleStats by ruleStatDao.observeAll().collectAsState(initial = emptyList())
 
     var status by remember { mutableStateOf(readSetupStatus(context)) }
     var selectedTab by rememberSaveable {
@@ -219,6 +231,38 @@ fun SmashSmsScreen() {
         contract = ActivityResultContracts.RequestMultiplePermissions(),
     ) {
         status = readSetupStatus(context)
+    }
+
+    val exportManifestLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            val exported = withContext(Dispatchers.IO) {
+                try {
+                    RuleStatsTracker.syncVersionIfNeeded(context, db)
+                    val pkgInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+                    val json = RuleManifest.buildJson(
+                        appVersionName = pkgInfo.versionName.orEmpty(),
+                        appVersionCode = pkgInfo.longVersionCode,
+                        builtInRuleNames = SpamDetector.builtInRuleNames(),
+                        stats = ruleStatDao.getAll(),
+                        customKeywords = customKeywords,
+                        allowedSendersCount = allowedSenders.size,
+                        quarantinedMessagesCount = quarantinedMessages.size,
+                    )
+                    context.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(json.toByteArray(Charsets.UTF_8))
+                    } ?: return@withContext false
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            snackbarHostState.showSnackbar(
+                if (exported) "Exported rule manifest" else "Failed to export rule manifest",
+            )
+        }
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -260,6 +304,7 @@ fun SmashSmsScreen() {
         messages = quarantinedMessages,
         customKeywords = customKeywords,
         allowedSenders = allowedSenders,
+        ruleStats = ruleStats,
         snackbarHostState = snackbarHostState,
         onRequestRuntimePermissions = {
             runtimePermissionLauncher.launch(REQUIRED_RUNTIME_PERMISSIONS)
@@ -291,9 +336,11 @@ fun SmashSmsScreen() {
         onAllowMessage = { message ->
             coroutineScope.launch {
                 val restored = withContext(Dispatchers.IO) {
+                    RuleStatsTracker.syncVersionIfNeeded(context, db)
                     val key = AllowedSender.normalize(message.sender)
                     allowedDao.deleteByNormalizedKey(key)
                     allowedDao.insert(AllowedSender(sender = message.sender))
+                    ruleStatDao.incrementOverride(message.matchedRule)
                     val needsRestore = message.deletedFromTelephony ||
                         !isSmsPresentInTelephony(context, message.sender, message.body)
                     val didRestore = if (needsRestore) {
@@ -352,6 +399,17 @@ fun SmashSmsScreen() {
                 allowedDao.deleteById(id)
             }
         },
+        onExportManifest = {
+            exportManifestLauncher.launch("smashsms-rule-manifest.json")
+        },
+        onResetRuleStats = {
+            coroutineScope.launch {
+                withContext(Dispatchers.IO) {
+                    ruleStatDao.clearAll()
+                }
+                snackbarHostState.showSnackbar("Reset rule block & override counts")
+            }
+        },
     )
 }
 
@@ -364,6 +422,7 @@ internal fun SmashSmsContent(
     messages: List<QuarantinedMessage>,
     customKeywords: List<CustomKeyword>,
     allowedSenders: List<AllowedSender>,
+    ruleStats: List<RuleStat> = emptyList(),
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
     onRequestRuntimePermissions: () -> Unit,
     onOpenNotificationListenerSettings: () -> Unit,
@@ -376,6 +435,8 @@ internal fun SmashSmsContent(
     onToggleCustomKeyword: (Long, Boolean) -> Unit,
     onDeleteCustomKeyword: (Long) -> Unit,
     onRemoveAllowedSender: (Long) -> Unit,
+    onExportManifest: () -> Unit = {},
+    onResetRuleStats: () -> Unit = {},
 ) {
     val fullyArmed = status.runtimePermissionsGranted &&
         status.notificationAccessGranted &&
@@ -459,10 +520,13 @@ internal fun SmashSmsContent(
                 innerPadding = innerPadding,
                 customKeywords = customKeywords,
                 allowedSenders = allowedSenders,
+                ruleStats = ruleStats,
                 onAddCustomKeyword = onAddCustomKeyword,
                 onToggleCustomKeyword = onToggleCustomKeyword,
                 onDeleteCustomKeyword = onDeleteCustomKeyword,
                 onRemoveAllowedSender = onRemoveAllowedSender,
+                onExportManifest = onExportManifest,
+                onResetRuleStats = onResetRuleStats,
             )
             SmashTab.SETUP -> SetupTabContent(
                 innerPadding = innerPadding,
@@ -570,14 +634,20 @@ private fun RulesTabContent(
     innerPadding: PaddingValues,
     customKeywords: List<CustomKeyword>,
     allowedSenders: List<AllowedSender>,
+    ruleStats: List<RuleStat>,
     onAddCustomKeyword: (String, Boolean) -> Unit,
     onToggleCustomKeyword: (Long, Boolean) -> Unit,
     onDeleteCustomKeyword: (Long) -> Unit,
     onRemoveAllowedSender: (Long) -> Unit,
+    onExportManifest: () -> Unit,
+    onResetRuleStats: () -> Unit,
 ) {
     var newKeyword by rememberSaveable { mutableStateOf("") }
     var isRegex by rememberSaveable { mutableStateOf(false) }
     var testInput by rememberSaveable { mutableStateOf("") }
+    val statsByRule = remember(ruleStats) { ruleStats.associateBy { it.ruleName } }
+    val totalBlocks = remember(ruleStats) { ruleStats.sumOf { it.blockedCount } }
+    val totalOverrides = remember(ruleStats) { ruleStats.sumOf { it.overrideCount } }
 
     val trimmedKeyword = newKeyword.trim()
     val invalidRegex = isRegex && trimmedKeyword.isNotEmpty() && !SpamDetector.isValidRegex(trimmedKeyword)
@@ -815,6 +885,58 @@ private fun RulesTabContent(
         item {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
+                text = "Rule Manifest & Stats",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                ),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = "$totalBlocks blocks • $totalOverrides overrides • ${customKeywords.size} custom patterns",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = "Export rule block/override counts and custom patterns as JSON without message text or phone numbers. Counts reset automatically on new app versions.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Button(
+                            onClick = onExportManifest,
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("Export Manifest")
+                        }
+                        TextButton(
+                            onClick = onResetRuleStats,
+                            enabled = totalBlocks > 0 || totalOverrides > 0,
+                        ) {
+                            Text("Reset Stats")
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
                 text = "Built-in Spam Rules",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
@@ -825,8 +947,14 @@ private fun RulesTabContent(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 SpamDetector.builtInRuleNames().forEach { ruleName ->
+                    val stat = statsByRule[ruleName]
+                    val chipLabel = if (stat != null && (stat.blockedCount > 0 || stat.overrideCount > 0)) {
+                        "$ruleName • ${stat.blockedCount}💥 ${stat.overrideCount}✓"
+                    } else {
+                        ruleName
+                    }
                     StatusChip(
-                        label = ruleName,
+                        label = chipLabel,
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                     )
