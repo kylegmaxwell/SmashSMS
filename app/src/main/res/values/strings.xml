@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">SmashSMS</string>
+    <string name="notification_listener_label">SmashSMS Spam Filter</string>
+</resources>
