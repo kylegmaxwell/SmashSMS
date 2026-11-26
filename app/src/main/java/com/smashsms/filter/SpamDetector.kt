@@ -15,10 +15,10 @@ object SpamDetector {
         val matchedRule: String? = null,
     )
 
+    const val RULE_UNKNOWN_IMAGE = "Unknown Image"
+
     private val rules: List<SpamRule> = listOf(
         SpamRule("ActBlue", Regex("actblue", RegexOption.IGNORE_CASE)),
-        SpamRule("WinRed", Regex("winred", RegexOption.IGNORE_CASE)),
-        SpamRule("NGP VAN", Regex("ngpvan", RegexOption.IGNORE_CASE)),
         SpamRule("End2End", Regex("""\bend\s*2\s*end\b""", RegexOption.IGNORE_CASE)),
         SpamRule("Stop2End", Regex("""\bstop\s*2\s*end\b""", RegexOption.IGNORE_CASE)),
         SpamRule("Stop to End", Regex("""\bstop\s+to\s+end\b""", RegexOption.IGNORE_CASE)),

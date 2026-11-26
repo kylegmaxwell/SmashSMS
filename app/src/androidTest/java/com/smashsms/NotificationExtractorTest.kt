@@ -2,14 +2,17 @@ package com.smashsms
 
 import android.app.Notification
 import android.content.Context
+import android.net.Uri
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.smashsms.service.NotificationGatekeeper
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -39,6 +42,52 @@ class NotificationExtractorTest {
         assertEquals("+1 (555) 222-3333", extracted.senderDisplay)
         assertEquals("Urgent FEC deadline! Chip in now End2End", extracted.body)
         assertEquals("+1 (555) 222-3333|123456|Urgent FEC deadline! Chip in now End2End", extracted.latestSignature)
+        assertFalse(extracted.hasImage)
+    }
+
+    @Test
+    fun extractsMessagingStyleImageAttachmentWithoutCaption() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val sender = Person.Builder()
+            .setName("+15552223333")
+            .setUri("tel:+15552223333")
+            .build()
+        val me = Person.Builder().setName("Me").build()
+        val message = NotificationCompat.MessagingStyle.Message("", 123456L, sender)
+            .setData("image/jpeg", Uri.parse("content://com.google.android.apps.messaging/part/1"))
+
+        val notification = NotificationCompat.Builder(context, "messages")
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setStyle(NotificationCompat.MessagingStyle(me).addMessage(message))
+            .build()
+
+        val extracted = NotificationGatekeeper.extractMessageContent(notification)
+        assertNotNull(extracted)
+        assertEquals("+15552223333", extracted!!.senderNumber)
+        assertEquals(NotificationGatekeeper.IMAGE_ATTACHMENT_PLACEHOLDER, extracted.body)
+        assertTrue(extracted.hasImage)
+    }
+
+    @Test
+    fun extractsMessagingStyleImageAttachmentWithCaption() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val sender = Person.Builder()
+            .setName("+15552223333")
+            .setUri("tel:+15552223333")
+            .build()
+        val me = Person.Builder().setName("Me").build()
+        val message = NotificationCompat.MessagingStyle.Message("Check this flyer", 123456L, sender)
+            .setData("image/png", Uri.parse("content://com.google.android.apps.messaging/part/2"))
+
+        val notification = NotificationCompat.Builder(context, "messages")
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setStyle(NotificationCompat.MessagingStyle(me).addMessage(message))
+            .build()
+
+        val extracted = NotificationGatekeeper.extractMessageContent(notification)
+        assertNotNull(extracted)
+        assertEquals("Check this flyer", extracted!!.body)
+        assertTrue(extracted.hasImage)
     }
 
     @Test
@@ -58,6 +107,7 @@ class NotificationExtractorTest {
         assertNull(extracted.senderNumber)
         assertEquals("Hey, want to grab lunch?", extracted.body)
         assertEquals("Alice Smith|98765|Hey, want to grab lunch?", extracted.latestSignature)
+        assertFalse(extracted.hasImage)
     }
 
     @Test

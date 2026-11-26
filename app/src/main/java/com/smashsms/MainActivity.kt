@@ -83,6 +83,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.smashsms.data.AllowedSender
 import com.smashsms.data.CustomKeyword
+import com.smashsms.data.FilterPreferences
 import com.smashsms.data.QuarantinedMessage
 import com.smashsms.data.RuleManifest
 import com.smashsms.data.RuleStat
@@ -217,6 +218,9 @@ fun SmashSmsScreen() {
     val ruleStats by ruleStatDao.observeAll().collectAsState(initial = emptyList())
 
     var status by remember { mutableStateOf(readSetupStatus(context)) }
+    var blockUnknownImages by remember {
+        mutableStateOf(FilterPreferences.isBlockUnknownImagesEnabled(context))
+    }
     var selectedTab by rememberSaveable {
         mutableStateOf(
             if (status.runtimePermissionsGranted && status.notificationAccessGranted) {
@@ -305,7 +309,12 @@ fun SmashSmsScreen() {
         customKeywords = customKeywords,
         allowedSenders = allowedSenders,
         ruleStats = ruleStats,
+        blockUnknownImages = blockUnknownImages,
         snackbarHostState = snackbarHostState,
+        onToggleBlockUnknownImages = { enabled ->
+            blockUnknownImages = enabled
+            FilterPreferences.setBlockUnknownImagesEnabled(context, enabled)
+        },
         onRequestRuntimePermissions = {
             runtimePermissionLauncher.launch(REQUIRED_RUNTIME_PERMISSIONS)
         },
@@ -342,7 +351,7 @@ fun SmashSmsScreen() {
                     allowedDao.insert(AllowedSender(sender = message.sender))
                     ruleStatDao.incrementOverride(message.matchedRule)
                     val needsRestore = message.deletedFromTelephony ||
-                        !isSmsPresentInTelephony(context, message.sender, message.body)
+                        (message.source == "SMS" && !isSmsPresentInTelephony(context, message.sender, message.body))
                     val didRestore = if (needsRestore) {
                         ShizukuHelper.restoreSmsToInbox(
                             sender = message.sender,
@@ -423,7 +432,9 @@ internal fun SmashSmsContent(
     customKeywords: List<CustomKeyword>,
     allowedSenders: List<AllowedSender>,
     ruleStats: List<RuleStat> = emptyList(),
+    blockUnknownImages: Boolean = true,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    onToggleBlockUnknownImages: (Boolean) -> Unit = {},
     onRequestRuntimePermissions: () -> Unit,
     onOpenNotificationListenerSettings: () -> Unit,
     onRequestShizukuPermission: () -> Unit,
@@ -521,6 +532,8 @@ internal fun SmashSmsContent(
                 customKeywords = customKeywords,
                 allowedSenders = allowedSenders,
                 ruleStats = ruleStats,
+                blockUnknownImages = blockUnknownImages,
+                onToggleBlockUnknownImages = onToggleBlockUnknownImages,
                 onAddCustomKeyword = onAddCustomKeyword,
                 onToggleCustomKeyword = onToggleCustomKeyword,
                 onDeleteCustomKeyword = onDeleteCustomKeyword,
@@ -635,6 +648,8 @@ private fun RulesTabContent(
     customKeywords: List<CustomKeyword>,
     allowedSenders: List<AllowedSender>,
     ruleStats: List<RuleStat>,
+    blockUnknownImages: Boolean,
+    onToggleBlockUnknownImages: (Boolean) -> Unit,
     onAddCustomKeyword: (String, Boolean) -> Unit,
     onToggleCustomKeyword: (Long, Boolean) -> Unit,
     onDeleteCustomKeyword: (Long) -> Unit,
@@ -648,6 +663,7 @@ private fun RulesTabContent(
     val statsByRule = remember(ruleStats) { ruleStats.associateBy { it.ruleName } }
     val totalBlocks = remember(ruleStats) { ruleStats.sumOf { it.blockedCount } }
     val totalOverrides = remember(ruleStats) { ruleStats.sumOf { it.overrideCount } }
+    val imageStat = statsByRule[SpamDetector.RULE_UNKNOWN_IMAGE]
 
     val trimmedKeyword = newKeyword.trim()
     val invalidRegex = isRegex && trimmedKeyword.isNotEmpty() && !SpamDetector.isValidRegex(trimmedKeyword)
@@ -664,6 +680,60 @@ private fun RulesTabContent(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        item {
+            Text(
+                text = "Image Filtering",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+                ),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = "Block Unknown Images",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Quarantine messages with images from senders not in Contacts or Allowed Senders.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (imageStat != null && (imageStat.blockedCount > 0 || imageStat.overrideCount > 0)) {
+                            Text(
+                                text = "${imageStat.blockedCount}💥 ${imageStat.overrideCount}✓",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                    }
+                    Switch(
+                        checked = blockUnknownImages,
+                        onCheckedChange = onToggleBlockUnknownImages,
+                    )
+                }
+            }
+        }
+
         item {
             Text(
                 text = "Custom Block Keywords",

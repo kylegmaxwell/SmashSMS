@@ -14,8 +14,6 @@ class SpamDetectorTest {
     fun detectsPoliticalFundraisingAndOptOutPatterns() {
         val spamSamples = listOf(
             "Donate today at https://secure.actblue.com/donate/example",
-            "Support the campaign on WinRed right now!",
-            "Link from ngpvan.com/xyz",
             "Urgent alert! Reply STOP to end messages.",
             "Text STOP2END to opt out.",
             "Can you chip in \$5 before midnight?",
@@ -44,6 +42,8 @@ class SpamDetectorTest {
             "Your verification code is 482910.",
             "Please stop by the grocery store on your way home.",
             "Running 10 minutes late!",
+            "Support the campaign on WinRed right now!",
+            "Link from ngpvan.com/xyz",
         )
 
         for (sample in hamSamples) {

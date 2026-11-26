@@ -121,6 +121,7 @@ class MainActivityUiTest {
         var addedKeyword: String? = null
         var exported = false
         var resetStats = false
+        var blockUnknownImages by mutableStateOf(true)
         var currentTab by mutableStateOf(SmashTab.REVIEW)
 
         composeRule.setContent {
@@ -144,6 +145,8 @@ class MainActivityUiTest {
                     ruleStats = listOf(
                         RuleStat(ruleName = "ActBlue", blockedCount = 3, overrideCount = 1),
                     ),
+                    blockUnknownImages = blockUnknownImages,
+                    onToggleBlockUnknownImages = { blockUnknownImages = it },
                     onRequestRuntimePermissions = {},
                     onOpenNotificationListenerSettings = {},
                     onRequestShizukuPermission = {},
@@ -162,6 +165,7 @@ class MainActivityUiTest {
         }
 
         composeRule.onNodeWithText("Rules").performClick()
+        composeRule.onNodeWithText("Block Unknown Images").assertIsDisplayed()
         composeRule.onNodeWithText("Custom Block Keywords").assertIsDisplayed()
         composeRule.onNodeWithText("crypto giveaway").assertIsDisplayed()
 

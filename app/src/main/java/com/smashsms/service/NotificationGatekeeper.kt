@@ -2,12 +2,14 @@ package com.smashsms.service
 
 import android.app.Notification
 import android.media.AudioManager
+import android.os.Bundle
 import androidx.core.app.NotificationCompat
 import com.smashsms.filter.ContactChecker
 import java.util.concurrent.ConcurrentHashMap
 
 internal object NotificationGatekeeper {
     const val STALE_POST_WINDOW_MS = 15_000L
+    const val IMAGE_ATTACHMENT_PLACEHOLDER = "[Image attachment]"
 
     enum class AlertAction {
         SOUND_AND_VIBRATE,
@@ -20,6 +22,7 @@ internal object NotificationGatekeeper {
         val senderNumber: String?,
         val body: String,
         val latestSignature: String,
+        val hasImage: Boolean = false,
     )
 
     class AlertTracker(
@@ -66,8 +69,18 @@ internal object NotificationGatekeeper {
         }
     }
 
+    private fun hasBigPicture(extras: Bundle): Boolean {
+        val template = extras.getString(Notification.EXTRA_TEMPLATE)
+        if (template == Notification.BigPictureStyle::class.java.name) {
+            return true
+        }
+        return extras.containsKey(Notification.EXTRA_PICTURE) ||
+            extras.containsKey(Notification.EXTRA_PICTURE_ICON)
+    }
+
     fun extractMessageContent(notification: Notification): ExtractedNotification? {
         val extras = notification.extras ?: return null
+        val bigPicture = hasBigPicture(extras)
         val messagingStyle = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)
         if (messagingStyle != null && messagingStyle.messages.isNotEmpty()) {
             val lastMessage = messagingStyle.messages.last()
@@ -81,18 +94,26 @@ internal object NotificationGatekeeper {
             val senderName = person?.name?.toString()?.trim()
                 ?: messagingStyle.conversationTitle?.toString()?.trim()
                 ?: extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()?.trim()
+            val hasImage = bigPicture || messagingStyle.messages.any { message ->
+                val mime = message.dataMimeType?.trim().orEmpty()
+                mime.startsWith("image/", ignoreCase = true) ||
+                    (message.dataUri != null && mime.isEmpty())
+            }
             val combinedText = messagingStyle.messages
                 .mapNotNull { it.text?.toString()?.trim() }
                 .filter { it.isNotEmpty() }
                 .joinToString("\n")
-            if (combinedText.isNotEmpty()) {
+            if (combinedText.isNotEmpty() || hasImage) {
+                val body = combinedText.ifEmpty { IMAGE_ATTACHMENT_PLACEHOLDER }
                 val latestText = lastMessage.text?.toString()?.trim().orEmpty()
+                    .ifEmpty { if (hasImage) "[image]" else "" }
                 val latestSignature = "${senderName.orEmpty()}|${lastMessage.timestamp}|$latestText"
                 return ExtractedNotification(
                     senderDisplay = senderName,
                     senderNumber = phoneFromUri,
-                    body = combinedText,
+                    body = body,
                     latestSignature = latestSignature,
+                    hasImage = hasImage,
                 )
             }
         }
@@ -107,13 +128,18 @@ internal object NotificationGatekeeper {
             ?.joinToString("\n")
             ?.takeIf { it.isNotEmpty() }
 
-        val body = bigText ?: lines ?: text ?: return null
+        val body = bigText ?: lines ?: text ?: if (bigPicture) {
+            IMAGE_ATTACHMENT_PLACEHOLDER
+        } else {
+            return null
+        }
         val latestSignature = "${title.orEmpty()}|${notification.`when`}|$body"
         return ExtractedNotification(
             senderDisplay = title,
             senderNumber = title?.takeIf { ContactChecker.looksLikePhoneNumber(it) },
             body = body,
             latestSignature = latestSignature,
+            hasImage = bigPicture,
         )
     }
 }

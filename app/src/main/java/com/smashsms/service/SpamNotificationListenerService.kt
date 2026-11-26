@@ -10,7 +10,10 @@ import android.os.VibratorManager
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.smashsms.data.AllowedSender
+import com.smashsms.data.FilterPreferences
 import com.smashsms.data.QuarantinedMessage
+import com.smashsms.data.RuleStatsTracker
 import com.smashsms.data.SmashSmsDatabase
 import com.smashsms.filter.ContactChecker
 import com.smashsms.filter.SpamDetector
@@ -32,7 +35,7 @@ class SpamNotificationListenerService : NotificationListenerService() {
         if ((notification.flags and Notification.FLAG_ONGOING_EVENT) != 0) return
 
         val extracted = NotificationGatekeeper.extractMessageContent(notification) ?: return
-        val (senderDisplay, senderNumber, body, latestSignature) = extracted
+        val (senderDisplay, senderNumber, body, latestSignature, hasImage) = extracted
         val isContact = isSavedContact(senderNumber, senderDisplay)
 
         serviceScope.launch {
@@ -46,14 +49,19 @@ class SpamNotificationListenerService : NotificationListenerService() {
                     if (!isAllowed) {
                         val customKeywords = db.customKeywordDao().getEnabled()
                         val match = SpamDetector.detect(body, customKeywords)
-                        if (match.isSpam) {
+                        val blockImages = FilterPreferences.isBlockUnknownImagesEnabled(applicationContext)
+                        val matchedRule = when {
+                            match.isSpam -> match.matchedRule ?: "Unknown"
+                            blockImages && hasImage -> SpamDetector.RULE_UNKNOWN_IMAGE
+                            else -> null
+                        }
+                        if (matchedRule != null) {
                             cancelNotification(sbn.key)
                             alertTracker.onRemoved(sbn.key)
                             val displaySender = senderNumber ?: senderDisplay ?: "Unknown"
-                            val matchedRule = match.matchedRule ?: "Unknown"
                             Log.i(
                                 TAG,
-                                "Dismissed Google Messages notification from $displaySender (rule=$matchedRule)",
+                                "Dismissed Google Messages notification from $displaySender (rule=$matchedRule, hasImage=$hasImage)",
                             )
                             logDismissedNotification(
                                 sender = displaySender,
@@ -66,7 +74,7 @@ class SpamNotificationListenerService : NotificationListenerService() {
                     }
                 }
 
-                // Clean message (saved contact, allowed sender, group chat, or non-spam): gatekeeper alert.
+                // Clean message (saved contact, allowed sender, or non-spam): gatekeeper alert.
                 val shouldAlert = alertTracker.shouldAlert(
                     key = sbn.key,
                     flags = notification.flags,
@@ -168,11 +176,11 @@ class SpamNotificationListenerService : NotificationListenerService() {
     ) {
         try {
             val db = SmashSmsDatabase.getInstance(applicationContext)
-            com.smashsms.data.RuleStatsTracker.syncVersionIfNeeded(applicationContext, db)
+            RuleStatsTracker.syncVersionIfNeeded(applicationContext, db)
             val dao = db.quarantinedMessageDao()
-            val normalizedSender = com.smashsms.data.AllowedSender.normalize(sender)
+            val normalizedSender = AllowedSender.normalize(sender)
             val alreadyLogged = dao.getRecent(timestamp - DEDUP_WINDOW_MS).any {
-                com.smashsms.data.AllowedSender.normalize(it.sender) == normalizedSender &&
+                AllowedSender.normalize(it.sender) == normalizedSender &&
                     it.body == body
             }
             if (!alreadyLogged) {
